@@ -158,6 +158,7 @@ class LlmProxy(ABC):
         image_out = response.data[0].b64_json
 
         im = Image.open(BytesIO(base64.b64decode(image_out)))
+        name_output_file = llm_proxy_time_string() + f"_{self.model}.jpg"
         im.save("picture_out.jpg", "JPEG")
 
         return image_out
