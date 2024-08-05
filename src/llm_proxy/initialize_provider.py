@@ -143,16 +143,18 @@ class LlmProxy(ABC):
         }
         return token_count_dict
 
-    def get_image(self, image_prompt: str):
+    def get_image(
+        self, image_prompt: str, width: int = 1024, height: int = 1024, steps: int = 40, n: int = 4, seed: int = 6439
+    ) -> str:
 
         response = self.client.images.generate(
             prompt=image_prompt,
             model=self.model,
-            width=1024,
-            height=1024,
-            steps=40,
-            n=4,
-            seed=6439,
+            width=width,
+            height=height,
+            steps=steps,
+            n=n,
+            seed=seed,
         )
 
         image_out = response.data[0].b64_json
