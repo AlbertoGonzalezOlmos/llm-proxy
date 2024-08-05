@@ -5,6 +5,7 @@ annotated-types==0.7.0
 anyio==4.4.0
 astor==0.8.1
 async-timeout==4.0.3
+asyncio==3.4.3
 attrs==24.1.0
 black==24.8.0
 build==1.2.1
@@ -27,7 +28,7 @@ httpx==0.27.0
 idna==3.7
 iniconfig==2.0.0
 isort==5.13.2
--e git+ssh://git@github.com/AlbertoGonzalezOlmos/llm-proxy.git@c88648fceed3702174f42bab62953912b82f262b#egg=llm_proxy
+-e git+ssh://git@github.com/AlbertoGonzalezOlmos/llm-proxy.git@39f2c6b9aa96704aeee2a2f9bdee5882cc0b1194#egg=llm_proxy
 makefun==1.15.4
 markdown-it-py==3.0.0
 mdurl==0.1.2

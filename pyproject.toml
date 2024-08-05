@@ -28,11 +28,12 @@ classifiers = [
 
 urls = { Project = "https://https://github.com/AlbertoGonzalezOlmos/llm-proxy" }
 dependencies = [
-    "groq >= 0.9.0",
-    "together >=1.2.3",
-    "python-dotenv >= 1.0.1",
-    "pillow >= 10.4.0",
-    "tqdm >= 4.66.5",
+    "groq >= 0.9.0, < 1",
+    "together >=1.2.3, < 2",
+    "asyncio >= 3.4.3, < 4",
+    "python-dotenv >= 1.0.1, < 2",
+    "pillow >= 10.4.0, < 11",
+    "tqdm >= 4.66.5, < 5",
 ]
 
 [tool.pytest.ini_options]
