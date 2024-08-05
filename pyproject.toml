@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools >= 66.1.1"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["llm_proxy*"]
+namespaces = true
+
+[project]
+name = "llm_proxy"
+version = "0.0.1"
+description = "Package to manage API requests to LLM providers"
+readme = "README.md"
+license.file = "LICENSE"
+requires-python = ">=3.10"
+authors = [
+    { name = "Alberto Gonzalez Olmos", email = "alberto.gonzalez.olmos@gmail.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+urls = { Project = "https://https://github.com/AlbertoGonzalezOlmos/llm-proxy" }
+dependencies = [
+    "groq >= 0.9.0",
+    "together >=1.2.3",
+    "python-dotenv >= 1.0.1",
+    "pillow >= 10.4.0",
+    "tqdm >= 4.66.5",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = [
+    "--import-mode=append",
+    "--strict-markers",
+    "-n=auto",
+    "-rxs",  # Show info on (x)fail and (s)kipped tests on output
+]
+
+[tool.mypy]
+python_version = "3.10"
+files = "src/**/*.py, tests/**/*.py"
+[[tool.mypy.overrides]]
+module = ["llm_proxy.*"]
+ignore_missing_imports = true
+
+[tool.flynt]
+line_length = 120
+
+[tool.isort]
+profile = "black"
+line_length = 120
+combine_as_imports = true
+src_paths = ["src", "tests"]
+
+[tool.black]
+line-length = 120

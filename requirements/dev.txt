@@ -1,0 +1,6 @@
+-r base.txt
+-r test.txt
+black >= 24
+flynt
+isort
+mypy

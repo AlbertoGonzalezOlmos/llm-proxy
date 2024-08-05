@@ -10,7 +10,7 @@ import datetime
 import logging
 
 from io import BytesIO
-import base64, json
+import base64
 from PIL import Image
 
 list_providers = Literal["groq", "together"]
@@ -18,9 +18,7 @@ list_modalities = Literal["chat", "image", "stt", "code"]
 
 
 class LlmProxy(ABC):
-    def __init__(
-        self, provider: list_providers, modality: list_modalities, model: str = ""
-    ):
+    def __init__(self, provider: list_providers, modality: list_modalities, model: str = ""):
         self.logging_initialize()
         self.provider = provider
         self.modality = modality
@@ -98,9 +96,7 @@ class LlmProxy(ABC):
         )
 
     def error_not_supported(self) -> None:
-        self.log.error(
-            f"Modality: '{self.modality}' is not supported by '{self.provider}'."
-        )
+        self.log.error(f"Modality: '{self.modality}' is not supported by '{self.provider}'.")
 
     def request_per_minute_limit_initialize(self) -> None:
         match self.provider:
@@ -198,8 +194,7 @@ class LlmProxy(ABC):
                 llm_response = completion.content[0].text
 
         llm_message_result_list = [
-            ", ".join([f"{key}: {value}" for key, value in dictionary.items()])
-            for dictionary in llm_message
+            ", ".join([f"{key}: {value}" for key, value in dictionary.items()]) for dictionary in llm_message
         ]
         llm_message_result_string = ", ".join(llm_message_result_list)
         self.count_tokens(llm_message_result_string, llm_response)
@@ -210,9 +205,7 @@ class LlmProxy(ABC):
 def llm_proxy_time_string() -> str:
     current_datetime = datetime.datetime.now()
     timestamp = current_datetime.timestamp()
-    formatted_string = datetime.datetime.fromtimestamp(timestamp).strftime(
-        "%Y-%m-%d_%Hh%Mm%Ss"
-    )
+    formatted_string = datetime.datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d_%Hh%Mm%Ss")
     return formatted_string
 
 
