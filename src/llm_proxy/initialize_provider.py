@@ -7,7 +7,7 @@ import os
 from typing import Literal, Union
 from abc import ABC
 import datetime
-from time import perf_counter
+from time import perf_counter, sleep
 import logging
 
 from io import BytesIO
@@ -24,6 +24,7 @@ class LlmProxy(ABC):
         self.provider = provider
         self.modality = modality
         self.model = model
+        self.timer_start: float
         self.client_initialize()
         self.request_per_minute_limit_initialize()
         match modality:
@@ -85,7 +86,7 @@ class LlmProxy(ABC):
                         # "mistralai/Mixtral-8x7B-v0.1"
 
         self.log.info(
-            f"Provider: '{self.provider}' was initialized for modality: '{self.modality}' with model '{self.model}'..."
+            f"Provider: '{self.provider}' was initialized for modality: '{self.modality}' with model '{self.model}'."
         )
 
     def logging_initialize(self) -> None:
@@ -96,12 +97,13 @@ class LlmProxy(ABC):
             datefmt="%Y-%m-%d %H:%M:%S",
         )
         self.log = logging.getLogger(__name__)
-        self.log.info("Starting LLM Proxy...")
 
     def error_modality_not_supported(self) -> None:
         self.log.error(f"Modality: '{self.modality}' is not supported by '{self.provider}'.")
 
     def request_per_minute_limit_initialize(self) -> None:
+        self.is_limit_reached = False
+
         match self.provider:
             case "groq":
                 match self.model:
@@ -113,13 +115,19 @@ class LlmProxy(ABC):
                         self.request_per_minute_limit = 30
             case "together":
                 self.request_per_minute_limit = 60
+        self.request_per_minute_limit -= 1
+        self.log.info(
+            f" - timeoff set to: {(60 / self.request_per_minute_limit):.2f} seconds.",
+        )
 
-    async def rpm_wait(self) -> bool:
-        print(f"will await {60 / self.request_per_minute_limit} seconds ...")
-        time_before = perf_counter()
-        await asyncio.sleep(60 / self.request_per_minute_limit)
-        print(f"... waited: {perf_counter() - time_before} seconds.")
-        return True
+    def set_timer(self) -> None:
+        self.timer_start = perf_counter()
+
+    def get_timer(self) -> int:
+        return f"{(perf_counter() - self.timer_start):.2f}"
+
+    def rpm_wait(self, queue_number) -> None:
+        sleep((60 / self.request_per_minute_limit) * queue_number)
 
     def tokenizer_initialize(self) -> None:
         self.session_start = llm_proxy_time_string()
@@ -127,7 +135,6 @@ class LlmProxy(ABC):
         self.llm_response_count_tokens = 0
 
     async def count_async_tokens(self, llm_message: str, llm_response: str) -> None:
-        print("count!")
         await asyncio.to_thread(self.count_tokens, llm_message, llm_response)
 
     def count_tokens(self, llm_message: str, llm_response: str) -> None:
@@ -165,16 +172,47 @@ class LlmProxy(ABC):
 
         return image_out
 
+    async def get_async_completion_bulk(
+        self,
+        system_prompt_list: list[str] = [],
+        user_prompt_list: list[str] = [],
+        temperature_list: list[int] = [],
+    ) -> tuple[str]:
+        if not user_prompt_list:
+            raise ValueError("User_prompt_list is empty.")
+        if not system_prompt_list:
+            system_prompt_list = [""] * len(user_prompt_list)
+        if not temperature_list:
+            temperature_list = [0] * len(user_prompt_list)
+        self.set_timer()
+        return await asyncio.gather(
+            *[
+                self.get_async_completion(
+                    system_prompt=system_prompt_list[idx_item],
+                    user_prompt=user_prompt,
+                    temperature=temperature_list[idx_item],
+                    queue_number=idx_item,
+                )
+                for idx_item, user_prompt in enumerate(user_prompt_list)
+            ]
+        )
+
     async def get_async_completion(
         self,
         system_prompt: str = "",
         user_prompt: str = "",
         temperature: int = 0,
+        queue_number: int = 0,
     ) -> str:
 
-        if await self.rpm_wait():
-            llm_response = await asyncio.to_thread(self.get_completion, system_prompt, user_prompt, temperature)
-            await self.count_async_tokens(system_prompt + user_prompt, llm_response)
+        self.rpm_wait(queue_number)
+        self.log.info(
+            f" - elapsed time: {self.get_timer()}, should be >= than: {(60 / self.request_per_minute_limit):.2f}."
+        )
+        llm_response = await asyncio.to_thread(self.get_completion, system_prompt, user_prompt, temperature)
+        self.set_timer()
+        await self.count_async_tokens(system_prompt + user_prompt, llm_response)
+
         return llm_response
 
     def get_completion(
@@ -239,11 +277,86 @@ class TandemProxy(ABC):
         self.logging_initialize()
         self.model = model
         self.client_initialize()
-        self.request_per_minute_limit_initialize()
-        self.tokenizer_initialize()
 
     def client_initialize(self) -> Union[Together, Groq]:
         load_dotenv()
+        match self.model:
+            case "llama-3.1-8b":
+                self.groq_provider = LlmProxy(provider="groq", modality="chat", model="llama-3.1-8b-instant")
+                self.together_provider = LlmProxy(
+                    provider="together", modality="chat", model="meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+                )
+            case "llama-3.1-70b":
+                self.groq_provider = LlmProxy(provider="groq", modality="chat", model="llama-3.1-70b-versatile")
+                self.together_provider = LlmProxy(
+                    provider="together", modality="chat", model="meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
+                )
+        self.list_providers = [self.groq_provider, self.together_provider]
+        self.number_of_providers = len(self.list_providers)
+        self.current_provider = 0
+        self.log.info(f"LLM Tandem initialized.")
+
+    def logging_initialize(self) -> None:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        self.log = logging.getLogger(__name__)
+
+    async def get_async_completion_bulk(
+        self,
+        system_prompt_list: list[str] = [],
+        user_prompt_list: list[str] = [],
+        temperature_list: list[int] = [],
+    ) -> tuple[str]:
+        if not user_prompt_list:
+            raise ValueError("User_prompt_list is empty.")
+        if not system_prompt_list:
+            system_prompt_list = [""] * len(user_prompt_list)
+        if not temperature_list:
+            temperature_list = [0] * len(user_prompt_list)
+        return await asyncio.gather(
+            *[
+                self.get_async_completion(
+                    system_prompt=system_prompt_list[idx_item],
+                    user_prompt=user_prompt,
+                    temperature=temperature_list[idx_item],
+                )
+                for idx_item, user_prompt in enumerate(user_prompt_list)
+            ]
+        )
+
+    async def get_async_completion(
+        self,
+        system_prompt: str = "",
+        user_prompt: str = "",
+        temperature: int = 0,
+    ) -> str:
+
+        return await asyncio.to_thread(self.get_completion, system_prompt, user_prompt, temperature)
+
+    def get_completion(
+        self,
+        system_prompt: str = "",
+        user_prompt: str = "",
+        temperature: int = 0,
+    ) -> str:
+
+        self.log.info(f"Using: '{self.list_providers[self.current_provider].provider}' provider...")
+        llm_response = self.list_providers[self.current_provider].get_completion(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=temperature,
+        )
+        self.next_provider()
+
+        return llm_response
+
+    def next_provider(self) -> None:
+        self.current_provider += 1
+        if self.current_provider >= self.number_of_providers:
+            self.current_provider = 0
 
 
 def main():
@@ -279,18 +392,150 @@ async def main_async():
     200 g walnuts,
 
     """
+
+    request_list = [f"cuantos son dos mas dos.", f"4 + 9", f"What is a giraffe? reply with 5 words."]
+    request_list_dos = [
+        f"cuantos son cuatro mas fem in danish.",
+        f"7 + vier",
+        f"What is an elephant? reply with 5 words.",
+    ]
+
+    list_of_list_of_requests = [request_list, request_list_dos, request_list, request_list_dos]
+
+    list_of_requests_tandem = [
+        f"cuantos son dos mas dos.",
+        f"4 + 9",
+        f"What is a giraffe? reply with 5 words.",
+        f"cuantos son cuatro mas fem in danish.",
+        f"7 + vier",
+        f"What is an elephant? reply with 5 words.",
+        f"cuantos son dos mas dos.",
+        f"4 + 9",
+        f"What is a giraffe? reply with 5 words.",
+        f"cuantos son cuatro mas fem in danish.",
+        f"7 + vier",
+        f"What is an elephant? reply with 5 words.",
+    ]
+
+    results_list_dict = []
+
     provider = "together"
     modality = "chat"
-    model = ""
+    model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
     llmObj = LlmProxy(provider=provider, modality=modality, model=model)
-    print("start")
-    completion = await llmObj.get_async_completion(user_prompt=shopping_list)
-    print("finish")
-    print(completion)
-    print("finish finish")
+
+    time_start = perf_counter()
+    _ = await asyncio.gather(
+        *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
+    )
+    strategy = f"bulk, provider: {provider}"
+    elapsed_time_int = perf_counter() - time_start
+    elapsed_time = f"{elapsed_time_int:.2f}"
+    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    time_per_request = f"{time_per_request_float:.2f}"
+    results_list_dict.append(
+        {
+            "strategy": strategy,
+            "elapsed_time": elapsed_time,
+            "number_of_requests": len(list_of_requests_tandem),
+            "time_per_request": time_per_request,
+        }
+    )
+
+    provider = "groq"
+    modality = "chat"
+    model = "llama-3.1-8b-instant"
+    llmObj = LlmProxy(provider=provider, modality=modality, model=model)
+
+    time_start = perf_counter()
+    _ = await asyncio.gather(
+        *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
+    )
+    strategy = f"bulk, provider: {provider}"
+    elapsed_time_int = perf_counter() - time_start
+    elapsed_time = f"{elapsed_time_int:.2f}"
+    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    time_per_request = f"{time_per_request_float:.2f}"
+    results_list_dict.append(
+        {
+            "strategy": strategy,
+            "elapsed_time": elapsed_time,
+            "number_of_requests": len(list_of_requests_tandem),
+            "time_per_request": time_per_request,
+        }
+    )
+
+    llmObj_tandem = TandemProxy(model="llama-3.1-8b")
+    list_results_tandem = []
+    time_start = perf_counter()
+    for i_list_item in list_of_requests_tandem:
+        list_results_tandem.append(llmObj_tandem.get_completion(user_prompt=i_list_item))
+    strategy = f"Tandem serial"
+    elapsed_time_int = perf_counter() - time_start
+    elapsed_time = f"{elapsed_time_int:.2f}"
+    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    time_per_request = f"{time_per_request_float:.2f}"
+    results_list_dict.append(
+        {
+            "strategy": strategy,
+            "elapsed_time": elapsed_time,
+            "number_of_requests": len(list_of_requests_tandem),
+            "time_per_request": time_per_request,
+        }
+    )
+
+    llmObj_tandem_2 = TandemProxy(model="llama-3.1-8b")
+    list_results_tandem_2 = []
+    time_start = perf_counter()
+    for i_list_item in list_of_requests_tandem:
+        list_results_tandem_2.append(await llmObj_tandem_2.get_async_completion(user_prompt=i_list_item))
+    strategy = f"Tandem async"
+    elapsed_time_int = perf_counter() - time_start
+    elapsed_time = f"{elapsed_time_int:.2f}"
+    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    time_per_request = f"{time_per_request_float:.2f}"
+    results_list_dict.append(
+        {
+            "strategy": strategy,
+            "elapsed_time": elapsed_time,
+            "number_of_requests": len(list_of_requests_tandem),
+            "time_per_request": time_per_request,
+        }
+    )
+
+    llmObj_tandem_3 = TandemProxy(model="llama-3.1-8b")
+    time_start = perf_counter()
+    _ = await asyncio.gather(
+        *[
+            llmObj_tandem_3.get_async_completion_bulk(user_prompt_list=request_list)
+            for request_list in list_of_list_of_requests
+        ]
+    )
+    strategy = f"Tandem async bulk"
+    elapsed_time_int = perf_counter() - time_start
+    elapsed_time = f"{elapsed_time_int:.2f}"
+    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    time_per_request = f"{time_per_request_float:.2f}"
+    results_list_dict.append(
+        {
+            "strategy": strategy,
+            "elapsed_time": elapsed_time,
+            "number_of_requests": len(list_of_requests_tandem),
+            "time_per_request": time_per_request,
+        }
+    )
+
+    print("####################################### \n #########################################")
+    for dict_entry in results_list_dict:
+        print(
+            "Proxy strategy: {} \n".format(dict_entry["strategy"]),
+            " - Number of requests: {} \n".format(dict_entry["number_of_requests"]),
+            " - Elapsed time: {} seconds \n".format(dict_entry["elapsed_time"]),
+            " - Time per request: {} seconds \n".format(dict_entry["time_per_request"]),
+        )
 
 
 if __name__ == "__main__":
-    # asyncio.run(main_async())
+    asyncio.run(main_async())
 
-    main()
+    # main()
