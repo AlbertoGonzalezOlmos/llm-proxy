@@ -51,8 +51,7 @@ class LlmProxy(ABC):
                     case "image":
                         return self.error_modality_not_supported()
                     case "stt":
-                        return self.error_modality_not_supported()
-                        # self.model = "whisper-large-v3"
+                        self.model = "whisper-large-v3"
                     case "code":
                         return self.error_modality_not_supported()
 
@@ -115,7 +114,6 @@ class LlmProxy(ABC):
                         self.request_per_minute_limit = 30
             case "together":
                 self.request_per_minute_limit = 60
-        self.request_per_minute_limit -= 1
         self.log.info(
             f" - timeoff set to: {(60 / self.request_per_minute_limit):.2f} seconds.",
         )
@@ -124,10 +122,24 @@ class LlmProxy(ABC):
         self.timer_start = perf_counter()
 
     def get_timer(self) -> int:
-        return f"{(perf_counter() - self.timer_start):.2f}"
+        return perf_counter() - self.timer_start
 
-    def rpm_wait(self, queue_number) -> None:
-        sleep((60 / self.request_per_minute_limit) * queue_number)
+    def rpm_wait(self, queue_number: int = 0) -> None:
+        time_left = 0
+        if queue_number > 0:
+            time_left = (60 / self.request_per_minute_limit) * queue_number
+        else:
+            time_left = (60 / self.request_per_minute_limit) - self.get_timer()
+            if time_left < 0:
+                time_left = 0
+        sleep(time_left)
+        self.is_limit_reached = False
+
+    def time_off(self, queue_number: int = 0) -> None:
+        if self.is_limit_reached:
+            self.rpm_wait(queue_number)
+        self.set_timer()
+        self.is_limit_reached = True
 
     def tokenizer_initialize(self) -> None:
         self.session_start = llm_proxy_time_string()
@@ -172,6 +184,15 @@ class LlmProxy(ABC):
 
         return image_out
 
+    def audio_to_text(self, filepath):
+
+        with open(filepath, "rb") as file:
+            translation = self.client.audio.translations.create(
+                file=(filepath, file.read()),
+                model=self.model,
+            )
+        return translation.text
+
     async def get_async_completion_bulk(
         self,
         system_prompt_list: list[str] = [],
@@ -204,13 +225,13 @@ class LlmProxy(ABC):
         temperature: int = 0,
         queue_number: int = 0,
     ) -> str:
-
-        self.rpm_wait(queue_number)
+        self.time_off(queue_number)
+        # self.rpm_wait(queue_number)
         self.log.info(
             f" - elapsed time: {self.get_timer()}, should be >= than: {(60 / self.request_per_minute_limit):.2f}."
         )
         llm_response = await asyncio.to_thread(self.get_completion, system_prompt, user_prompt, temperature)
-        self.set_timer()
+        # self.set_timer()
         await self.count_async_tokens(system_prompt + user_prompt, llm_response)
 
         return llm_response
@@ -230,6 +251,8 @@ class LlmProxy(ABC):
         ]
 
         llm_response = ""
+
+        self.time_off()
 
         match self.provider:
             case "groq" | "together" | "openai":
@@ -382,88 +405,56 @@ def main():
 
 
 async def main_async():
-    shopping_list = f"""
 
-    4 apples, 
-    500g chicken,
-    2 apples,
-    100 chicken,
-    1 kg carrots,
-    200 g walnuts,
-
-    """
-
-    request_list = [f"cuantos son dos mas dos.", f"4 + 9", f"What is a giraffe? reply with 5 words."]
-    request_list_dos = [
-        f"cuantos son cuatro mas fem in danish.",
-        f"7 + vier",
-        f"What is an elephant? reply with 5 words.",
-    ]
-
-    list_of_list_of_requests = [request_list, request_list_dos, request_list, request_list_dos]
-
-    list_of_requests_tandem = [
-        f"cuantos son dos mas dos.",
-        f"4 + 9",
-        f"What is a giraffe? reply with 5 words.",
-        f"cuantos son cuatro mas fem in danish.",
-        f"7 + vier",
-        f"What is an elephant? reply with 5 words.",
-        f"cuantos son dos mas dos.",
-        f"4 + 9",
-        f"What is a giraffe? reply with 5 words.",
-        f"cuantos son cuatro mas fem in danish.",
-        f"7 + vier",
-        f"What is an elephant? reply with 5 words.",
-    ]
+    from prompts_to_test import list_of_list_of_requests, list_of_requests_tandem
 
     results_list_dict = []
 
-    provider = "together"
-    modality = "chat"
-    model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
-    llmObj = LlmProxy(provider=provider, modality=modality, model=model)
+    # provider = "together"
+    # modality = "chat"
+    # model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+    # llmObj = LlmProxy(provider=provider, modality=modality, model=model)
 
-    time_start = perf_counter()
-    _ = await asyncio.gather(
-        *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
-    )
-    strategy = f"bulk, provider: {provider}"
-    elapsed_time_int = perf_counter() - time_start
-    elapsed_time = f"{elapsed_time_int:.2f}"
-    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    time_per_request = f"{time_per_request_float:.2f}"
-    results_list_dict.append(
-        {
-            "strategy": strategy,
-            "elapsed_time": elapsed_time,
-            "number_of_requests": len(list_of_requests_tandem),
-            "time_per_request": time_per_request,
-        }
-    )
+    # time_start = perf_counter()
+    # _ = await asyncio.gather(
+    #     *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
+    # )
+    # strategy = f"bulk, provider: {provider}"
+    # elapsed_time_int = perf_counter() - time_start
+    # elapsed_time = f"{elapsed_time_int:.2f}"
+    # time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    # time_per_request = f"{time_per_request_float:.2f}"
+    # results_list_dict.append(
+    #     {
+    #         "strategy": strategy,
+    #         "elapsed_time": elapsed_time,
+    #         "number_of_requests": len(list_of_requests_tandem),
+    #         "time_per_request": time_per_request,
+    #     }
+    # )
 
-    provider = "groq"
-    modality = "chat"
-    model = "llama-3.1-8b-instant"
-    llmObj = LlmProxy(provider=provider, modality=modality, model=model)
+    # provider = "groq"
+    # modality = "chat"
+    # model = "llama-3.1-8b-instant"
+    # llmObj = LlmProxy(provider=provider, modality=modality, model=model)
 
-    time_start = perf_counter()
-    _ = await asyncio.gather(
-        *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
-    )
-    strategy = f"bulk, provider: {provider}"
-    elapsed_time_int = perf_counter() - time_start
-    elapsed_time = f"{elapsed_time_int:.2f}"
-    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    time_per_request = f"{time_per_request_float:.2f}"
-    results_list_dict.append(
-        {
-            "strategy": strategy,
-            "elapsed_time": elapsed_time,
-            "number_of_requests": len(list_of_requests_tandem),
-            "time_per_request": time_per_request,
-        }
-    )
+    # time_start = perf_counter()
+    # _ = await asyncio.gather(
+    #     *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
+    # )
+    # strategy = f"bulk, provider: {provider}"
+    # elapsed_time_int = perf_counter() - time_start
+    # elapsed_time = f"{elapsed_time_int:.2f}"
+    # time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
+    # time_per_request = f"{time_per_request_float:.2f}"
+    # results_list_dict.append(
+    #     {
+    #         "strategy": strategy,
+    #         "elapsed_time": elapsed_time,
+    #         "number_of_requests": len(list_of_requests_tandem),
+    #         "time_per_request": time_per_request,
+    #     }
+    # )
 
     llmObj_tandem = TandemProxy(model="llama-3.1-8b")
     list_results_tandem = []
