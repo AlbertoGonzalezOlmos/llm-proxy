@@ -366,13 +366,26 @@ class TandemProxy(ABC):
         user_prompt: str = "",
         temperature: int = 0,
     ) -> str:
-
-        self.log.info(f"Using: '{self.list_providers[self.current_provider].provider}' provider...")
-        llm_response = self.list_providers[self.current_provider].get_completion(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=temperature,
-        )
+        is_request_successful = False
+        attempts = 1
+        while not is_request_successful:
+            try:
+                self.log.info(f"Using: '{self.list_providers[self.current_provider].provider}' provider...")
+                llm_response = self.list_providers[self.current_provider].get_completion(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=temperature,
+                )
+                is_request_successful = True
+            except:
+                self.log.warning(
+                    f"Request failed with: '{self.list_providers[self.current_provider].provider}' provider. Attempt: {attempts}."
+                )
+                self.list_providers[self.current_provider].rpm_wait()
+                self.log.warning(
+                    f"Request failed with: '{self.list_providers[self.current_provider].provider}' provider."
+                )
+                attempts += 1
         self.next_provider()
 
         return llm_response
