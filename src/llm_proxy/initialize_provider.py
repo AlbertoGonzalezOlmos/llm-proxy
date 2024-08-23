@@ -114,6 +114,7 @@ class LlmProxy(ABC):
                         self.request_per_minute_limit = 30
             case "together":
                 self.request_per_minute_limit = 60
+        self.request_per_minute_limit += 1
         self.log.info(
             f" - timeoff set to: {(60 / self.request_per_minute_limit):.2f} seconds.",
         )
