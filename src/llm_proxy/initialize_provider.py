@@ -185,7 +185,12 @@ class LlmProxy(ABC):
 
         return image_out
 
-    def audio_to_text(self, filepath):
+    async def audio_to_text_async(self, filepath: str) -> str:
+        return await asyncio.to_thread(self.audio_to_text, filepath)
+
+    def audio_to_text(self, filepath: str) -> str:
+
+        self.time_off()
 
         with open(filepath, "rb") as file:
             translation = self.client.audio.translations.create(
