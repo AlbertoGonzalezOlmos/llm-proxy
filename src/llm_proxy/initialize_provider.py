@@ -390,7 +390,7 @@ def llm_proxy_time_string() -> str:
 list_tandem_models = Literal["llama-3.1-70b", "llama-3.1-8b"]
 
 
-class TandemProxy(ABC):
+class TandemProxy:
     def __init__(self, model: list_tandem_models):
         self.logging_initialize()
         self.model = model
