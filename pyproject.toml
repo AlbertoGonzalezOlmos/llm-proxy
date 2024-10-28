@@ -28,8 +28,8 @@ classifiers = [
 
 urls = { Project = "https://https://github.com/AlbertoGonzalezOlmos/llm-proxy" }
 dependencies = [
-    "groq >= 0.9.0, < 1",
-    "together >=1.2.3, < 2",
+    "groq >= 0.11.0, < 1",
+    "together >=1.3.0, < 2",
     "replicate >= 0.31.0, < 1",
     "fal >= 1.3.0, < 2",
     "asyncio >= 3.4.3, < 4",

@@ -5,7 +5,6 @@ import asyncio
 from dotenv import load_dotenv
 import os
 from typing import Literal, Union
-from abc import ABC
 import datetime
 from time import perf_counter, sleep
 import logging
@@ -15,10 +14,10 @@ import base64
 from PIL import Image
 
 list_providers = Literal["groq", "together"]
-list_modalities = Literal["chat", "image", "stt", "code"]
+list_modalities = Literal["chat", "image", "stt", "code", "vision"]
 
 
-class LlmProxy(ABC):
+class LlmProxy:
     def __init__(self, provider: list_providers, modality: list_modalities, model: str = ""):
         self.logging_initialize()
         self.provider = provider
@@ -54,6 +53,8 @@ class LlmProxy(ABC):
                         self.model = "whisper-large-v3"
                     case "code":
                         return self.error_modality_not_supported()
+                    case "vision":
+                        return self.error_modality_not_supported()
 
             case "together":
                 api_key = os.environ.get("TOGETHER_API_KEY")
@@ -61,7 +62,7 @@ class LlmProxy(ABC):
                 match self.modality:
                     case "chat":
                         if self.model == "":
-                            self.model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
+                            self.model = "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
                         # "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo"
                         # "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo"
                         # "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
@@ -69,7 +70,8 @@ class LlmProxy(ABC):
                         # "Qwen/Qwen1.5-110B-Chat"
                     case "image":
                         if self.model == "":
-                            self.model = "stabilityai/stable-diffusion-xl-base-1.0"
+                            self.model = "black-forest-labs/FLUX.1.1-pro"
+                            # "black-forest-labs/FLUX.1.1-pro"
                             # "prompthero/openjourney"
                             # "runwayml/stable-diffusion-v1-5"
                             # "SG161222/Realistic_Vision_V3.0_VAE"
@@ -83,6 +85,12 @@ class LlmProxy(ABC):
                         # "Qwen/Qwen1.5-72B"
                         # "mistralai/Mistral-7B-v0.1"
                         # "mistralai/Mixtral-8x7B-v0.1"
+                    case "vision":
+                        if self.model == "":
+                            self.model = "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo"
+                        # "meta-llama/Llama-Vision-Free"
+                        # "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo"
+                        # "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo"
 
         self.log.info(
             f"Provider: '{self.provider}' was initialized for modality: '{self.modality}' with model '{self.model}'."
@@ -90,11 +98,11 @@ class LlmProxy(ABC):
 
     def logging_initialize(self) -> None:
 
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        # logging.basicConfig(
+        #     level=logging.INFO,
+        #     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        #     datefmt="%Y-%m-%d %H:%M:%S",
+        # )
         self.log = logging.getLogger(__name__)
 
     def error_modality_not_supported(self) -> None:
@@ -164,7 +172,15 @@ class LlmProxy(ABC):
         return token_count_dict
 
     def get_image(
-        self, image_prompt: str, width: int = 1024, height: int = 1024, steps: int = 40, n: int = 4, seed: int = 6439
+        self,
+        image_prompt: str,
+        output_path: str = "./",
+        output_name: str = "",
+        width: int = 512,
+        height: int = 512,
+        steps: int = 1,
+        n: int = 1,
+        seed: int = 6439,
     ) -> str:
 
         response = self.client.images.generate(
@@ -175,13 +191,16 @@ class LlmProxy(ABC):
             steps=steps,
             n=n,
             seed=seed,
+            response_format="b64_json",
         )
 
         image_out = response.data[0].b64_json
 
         im = Image.open(BytesIO(base64.b64decode(image_out)))
-        name_output_file = f"{llm_proxy_time_string()}_{self.model}.jpg".replace("/", "_").replace("'", "")
-        im.save(name_output_file, "JPEG")
+        if not output_path.endswith("/"):
+            output_path += "/"
+        name_output_file = f"{output_name+llm_proxy_time_string()}_{self.model}.jpg".replace("/", "_").replace("'", "")
+        im.save(output_path + name_output_file, "JPEG")
 
         return image_out
 
@@ -198,6 +217,76 @@ class LlmProxy(ABC):
                 model=self.model,
             )
         return translation.text
+
+    def analyze_image(self, image_path: str = "", system_image_prompt: str = "", user_image_prompt: str = "") -> str:
+
+        if not image_path:
+            url_text = "https://napkinsdev.s3.us-east-1.amazonaws.com/next-s3-uploads/d96a3145-472d-423a-8b79-bca3ad7978dd/trello-board.png"
+
+        else:
+            with open(image_path, "rb") as image_file:
+                base64_image = base64.b64encode(image_file.read()).decode("utf-8")
+                url_text = f"data:image/png;base64,{base64_image}"
+
+        if not system_image_prompt:
+            system_image_prompt = (
+                "You are an image analyst.  Your goal is to describe what is in the image provided as a file."
+            )
+        if not user_image_prompt:
+            user_image_prompt = "What is in this image?"
+
+        messages = [
+            {
+                "role": "system",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": system_image_prompt,
+                    }
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_image_prompt},
+                    {"type": "image_url", "image_url": {"url": url_text}},
+                ],
+            },
+        ]
+        # {
+        #     "role": "system",
+        #     "content": [
+        #         {
+        #             "type": "text",
+        #             "text": system_image_prompt,
+        #         }
+        #     ],
+        # },
+        # {
+        #     "role": "user",
+        #     "content": [
+        #         {"type": "text", "text": user_image_prompt},
+        #         {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}},
+        #     ],
+        # }
+
+        # {
+        #         "role": "assistant",
+        #         "content": "The image appears to be a satellite view of a desert landscape with a body of water. The left side of the image shows a vast expanse of sandy terrain, dotted with small green patches that could be vegetation or trees. A long, straight line runs diagonally across this section, possibly indicating a road or a boundary.\n\nOn the right side of the image, there is a large body of water, which could be a lake, river, or ocean. The water‛s edge is irregularly shaped, with several inlets and peninsulas visible. The surrounding terrain is also sandy, but it appears more rugged and rocky than the area on the left side of the image.\n\nOverall, the image suggests a harsh, arid environment with limited vegetation and a significant body of water. The exact location and purpose of the image are unclear without additional context."
+        # }
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            max_tokens=512,
+            temperature=0.7,
+            top_p=0.7,
+            top_k=50,
+            repetition_penalty=1,
+            stop=["<|eot_id|>", "<|eom_id|>"],
+            stream=False,
+        )
+        return response.choices[0].message.content
 
     async def get_async_completion_bulk(
         self,
@@ -326,11 +415,11 @@ class TandemProxy(ABC):
         self.log.info(f"LLM Tandem initialized.")
 
     def logging_initialize(self) -> None:
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        )
+        # logging.basicConfig(
+        #     level=logging.INFO,
+        #     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        #     datefmt="%Y-%m-%d %H:%M:%S",
+        # )
         self.log = logging.getLogger(__name__)
 
     async def get_async_completion_bulk(
@@ -397,153 +486,3 @@ class TandemProxy(ABC):
         self.current_provider += 1
         if self.current_provider >= self.number_of_providers:
             self.current_provider = 0
-
-
-def main():
-
-    shopping_list = f"""
-
-    4 apples, 
-    500g chicken,
-    2 apples,
-    100 chicken,
-    1 kg carrots,
-    200 g walnuts,
-
-    """
-    provider = "together"
-    modality = "chat"
-    model = ""
-    llmObj = LlmProxy(provider=provider, modality=modality, model=model)
-    print("start")
-    completion = llmObj.get_completion(user_prompt=shopping_list)
-    print("finish")
-    print(completion)
-
-
-async def main_async():
-
-    from prompts_to_test import list_of_list_of_requests, list_of_requests_tandem
-
-    results_list_dict = []
-
-    # provider = "together"
-    # modality = "chat"
-    # model = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo"
-    # llmObj = LlmProxy(provider=provider, modality=modality, model=model)
-
-    # time_start = perf_counter()
-    # _ = await asyncio.gather(
-    #     *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
-    # )
-    # strategy = f"bulk, provider: {provider}"
-    # elapsed_time_int = perf_counter() - time_start
-    # elapsed_time = f"{elapsed_time_int:.2f}"
-    # time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    # time_per_request = f"{time_per_request_float:.2f}"
-    # results_list_dict.append(
-    #     {
-    #         "strategy": strategy,
-    #         "elapsed_time": elapsed_time,
-    #         "number_of_requests": len(list_of_requests_tandem),
-    #         "time_per_request": time_per_request,
-    #     }
-    # )
-
-    # provider = "groq"
-    # modality = "chat"
-    # model = "llama-3.1-8b-instant"
-    # llmObj = LlmProxy(provider=provider, modality=modality, model=model)
-
-    # time_start = perf_counter()
-    # _ = await asyncio.gather(
-    #     *[llmObj.get_async_completion_bulk(user_prompt_list=request_list) for request_list in list_of_list_of_requests]
-    # )
-    # strategy = f"bulk, provider: {provider}"
-    # elapsed_time_int = perf_counter() - time_start
-    # elapsed_time = f"{elapsed_time_int:.2f}"
-    # time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    # time_per_request = f"{time_per_request_float:.2f}"
-    # results_list_dict.append(
-    #     {
-    #         "strategy": strategy,
-    #         "elapsed_time": elapsed_time,
-    #         "number_of_requests": len(list_of_requests_tandem),
-    #         "time_per_request": time_per_request,
-    #     }
-    # )
-
-    llmObj_tandem = TandemProxy(model="llama-3.1-8b")
-    list_results_tandem = []
-    time_start = perf_counter()
-    for i_list_item in list_of_requests_tandem:
-        list_results_tandem.append(llmObj_tandem.get_completion(user_prompt=i_list_item))
-    strategy = f"Tandem serial"
-    elapsed_time_int = perf_counter() - time_start
-    elapsed_time = f"{elapsed_time_int:.2f}"
-    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    time_per_request = f"{time_per_request_float:.2f}"
-    results_list_dict.append(
-        {
-            "strategy": strategy,
-            "elapsed_time": elapsed_time,
-            "number_of_requests": len(list_of_requests_tandem),
-            "time_per_request": time_per_request,
-        }
-    )
-
-    llmObj_tandem_2 = TandemProxy(model="llama-3.1-8b")
-    list_results_tandem_2 = []
-    time_start = perf_counter()
-    for i_list_item in list_of_requests_tandem:
-        list_results_tandem_2.append(await llmObj_tandem_2.get_async_completion(user_prompt=i_list_item))
-    strategy = f"Tandem async"
-    elapsed_time_int = perf_counter() - time_start
-    elapsed_time = f"{elapsed_time_int:.2f}"
-    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    time_per_request = f"{time_per_request_float:.2f}"
-    results_list_dict.append(
-        {
-            "strategy": strategy,
-            "elapsed_time": elapsed_time,
-            "number_of_requests": len(list_of_requests_tandem),
-            "time_per_request": time_per_request,
-        }
-    )
-
-    llmObj_tandem_3 = TandemProxy(model="llama-3.1-8b")
-    time_start = perf_counter()
-    _ = await asyncio.gather(
-        *[
-            llmObj_tandem_3.get_async_completion_bulk(user_prompt_list=request_list)
-            for request_list in list_of_list_of_requests
-        ]
-    )
-    strategy = f"Tandem async bulk"
-    elapsed_time_int = perf_counter() - time_start
-    elapsed_time = f"{elapsed_time_int:.2f}"
-    time_per_request_float = elapsed_time_int / len(list_of_requests_tandem)
-    time_per_request = f"{time_per_request_float:.2f}"
-    results_list_dict.append(
-        {
-            "strategy": strategy,
-            "elapsed_time": elapsed_time,
-            "number_of_requests": len(list_of_requests_tandem),
-            "time_per_request": time_per_request,
-        }
-    )
-
-    print("####################################### \n #########################################")
-    for dict_entry in results_list_dict:
-        print(
-            "Proxy strategy: {} \n".format(dict_entry["strategy"]),
-            " - Number of requests: {} \n".format(dict_entry["number_of_requests"]),
-            " - Elapsed time: {} seconds \n".format(dict_entry["elapsed_time"]),
-            " - Time per request: {} seconds \n".format(dict_entry["time_per_request"]),
-        )
-
-
-if __name__ == "__main__":
-    asyncio.run(main_async())
-
-    # main()
